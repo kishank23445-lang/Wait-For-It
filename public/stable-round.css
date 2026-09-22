@@ -1,0 +1,8 @@
+/* Fixed slots keep the reaction target stationary during every round state. */
+.arena { height: 430px; display: grid; grid-template-rows: 4.2rem minmax(8rem, 1fr) 5rem 3.2rem; align-items: center; justify-items: center; }
+.arena #instruction { height: 4.2rem; display: grid; place-items: center; margin: 0; overflow: hidden; }
+.arena #signal { margin: 0; }
+#reaction { width: min(280px, 100%); margin: 0; }
+#status { width: 100%; height: 3.2rem; display: grid; place-items: center; margin: 0; overflow: hidden; }
+@media (max-width: 650px) { .arena { height: 360px; grid-template-rows: 4.5rem minmax(7rem, 1fr) 4.5rem 3.2rem; } .arena #instruction { height: 4.5rem; font-size: 1.1rem; } .arena #signal { font-size: clamp(3.6rem, 18vw, 5.2rem); } }
+
