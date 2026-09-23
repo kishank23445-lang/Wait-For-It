@@ -9,6 +9,7 @@ const rooms = new Map();
 const clients = new Map();
 const POINTS = [5, 3, 2, 1];
 const NORMAL_ROUNDS = 10;
+const PUBLIC_ROOT = path.resolve(ROOT, 'public');
 
 function makeCode() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -71,18 +72,20 @@ function beginRound(room, suddenDeath = false) {
   room.phase = 'countdown';
   room.suddenDeath = suddenDeath;
   room.reactions = [];
-  room.cueAt = Date.now() + 4000;
-  room.fakeouts = [room.cueAt - 2800, room.cueAt - 1450];
+  // Vary the wait so players cannot predict the cue from a fixed countdown.
+  const waitMs = crypto.randomInt(18000, 30001);
+  room.cueAt = Date.now() + waitMs;
+  room.fakeouts = [room.cueAt - crypto.randomInt(9000, 12501), room.cueAt - crypto.randomInt(3500, 6501)];
   for (const player of room.players.values()) player.locked = false;
   announce(room);
 
-  schedule(room, 4000, () => {
+  schedule(room, waitMs, () => {
     if (room.phase !== 'countdown') return;
     room.phase = 'active';
     announce(room);
     // Sudden death gets a little more breathing room. It never declares a
     // winner without a real, server-accepted reaction.
-    schedule(room, suddenDeath ? 7000 : 4500, () => finishRound(room));
+    schedule(room, suddenDeath ? 9000 : 7000, () => finishRound(room));
   });
 }
 
@@ -97,7 +100,7 @@ function finishRound(room) {
   }));
   room.lastResults = results;
   announce(room);
-  schedule(room, 3800, () => advance(room));
+  schedule(room, 5500, () => advance(room));
 }
 
 function leaders(room) {
@@ -161,6 +164,15 @@ function handleMessage(socket, message) {
   if (message.type === 'join' && !client) return joinRoom(socket, message.code, message.name);
   if (!client) return;
   const { room, id } = client;
+  if (message.type === 'rematch') {
+    if (id !== room.hostId) return send(socket, { type: 'error', message: 'Only the host can set up the next match.' });
+    if (room.phase !== 'winner') return;
+    room.phase = 'lobby'; room.round = 0; room.suddenDeath = false; room.suddenDeathPlayers = null;
+    room.winnerIds = []; room.lastResults = [];
+    for (const player of room.players.values()) { player.score = 0; player.locked = false; }
+    announce(room);
+    return;
+  }
   if (message.type === 'start') {
     if (id !== room.hostId) return send(socket, { type: 'error', message: 'Only the host can start.' });
     if (room.phase !== 'lobby' || room.players.size < 2) return send(socket, { type: 'error', message: 'At least two players are needed.' });
@@ -223,8 +235,8 @@ function parseFrames(socket, chunk) {
 
 const server = http.createServer((req, res) => {
   const requested = req.url === '/' ? '/index.html' : req.url.split('?')[0];
-  const file = path.normalize(path.join(ROOT, 'public', requested));
-  if (!file.startsWith(path.join(ROOT, 'public'))) { res.writeHead(403); return res.end(); }
+  const file = path.resolve(PUBLIC_ROOT, `.${requested}`);
+  if (file !== PUBLIC_ROOT && !file.startsWith(PUBLIC_ROOT + path.sep)) { res.writeHead(403); return res.end(); }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
     const types = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' };
@@ -233,9 +245,11 @@ const server = http.createServer((req, res) => {
 });
 server.on('upgrade', (req, socket) => {
   if (req.headers.upgrade?.toLowerCase() !== 'websocket') return socket.destroy();
-  const accept = crypto.createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+  const key = req.headers['sec-websocket-key'];
+  if (!key || req.headers['sec-websocket-version'] !== '13') return socket.destroy();
+  const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
   socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n\r\n');
   socket.on('data', chunk => parseFrames(socket, chunk)); socket.on('close', () => leave(socket)); socket.on('error', () => leave(socket));
 });
-server.listen(PORT, () => console.log(`Wait For It! is running on http://localhost:${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Wait For It! is listening on port ${PORT}`));
 
